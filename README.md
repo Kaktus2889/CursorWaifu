@@ -2,6 +2,12 @@
 
 Oryginalna chibi anime, która mieszka na pulpicie i płynnie biega za kursorem.
 
+## Pobierz dla Windows
+
+**[Pobierz CursorWaifu.exe](https://github.com/Kaktus2889/ProgramTestowy/releases/latest/download/CursorWaifu.exe)**
+
+Pobierz plik i uruchom — instalowanie Pythona ani rozpakowywanie ZIP-a nie jest wymagane. Program nie ma podpisu cyfrowego; sprawdź, czy pobierasz go z tego repozytorium.
+
 ## Możliwości
 
 - płynny ruch z przyspieszaniem i hamowaniem,
