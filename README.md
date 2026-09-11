@@ -67,3 +67,4 @@ dist\CursorWaifu.exe
 - **ikona obok zegara** — ponowne pokazanie i zamknięcie aplikacji.
 
 Grafika postaci została przygotowana specjalnie dla tego projektu. Nie zawiera postaci z istniejącego anime.
+

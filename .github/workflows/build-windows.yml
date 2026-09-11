@@ -8,6 +8,9 @@ on:
       - "app.py"
       - "motion.py"
       - "caret.py"
+      - "animation.py"
+      - "update_checker.py"
+      - "version.py"
       - "test_*.py"
       - "requirements.txt"
       - "assets/**"
@@ -31,6 +34,10 @@ jobs:
 
       - name: Zainstaluj zależności
         run: python -m pip install -r requirements.txt
+
+      - name: Ustaw numer buildu
+        shell: pwsh
+        run: Set-Content -Path version.py -Value "BUILD_NUMBER = $env:GITHUB_RUN_NUMBER"
 
       - name: Testy ruchu i animacji
         # Regression tests run before packaging and publishing.
@@ -70,3 +77,4 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           gh release edit $tag --draft=false --latest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+

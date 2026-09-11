@@ -9,8 +9,11 @@ from pathlib import Path
 from motion import Motion
 from caret import CaretObserver, to_logical
 from animation import RunCycle, align_run, blend, ease
+from update_checker import UpdateChecker
+from version import BUILD_NUMBER
 
-from PySide6.QtCore import QPoint, QRect, QSettings, Qt, QTimer
+from PySide6.QtCore import QPoint, QRect, QSettings, Qt, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtGui import QAction, QCursor, QIcon, QPainter, QPixmap, QTransform, QBitmap, QRegion
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
 
@@ -82,6 +85,7 @@ class CursorWaifu(QWidget):
         self.last_frame_change = time.monotonic()
         self.state = "idle"
         self.reaction_until = 0.0
+        self.latest_update_url = None
 
         screen = QApplication.primaryScreen().availableGeometry()
         saved = self.settings.value("position")
@@ -101,6 +105,9 @@ class CursorWaifu(QWidget):
         self.timer.timeout.connect(self._tick)
         self.timer.start(TICK_MS)
         self._configure_refresh()
+        self.update_checker = UpdateChecker(BUILD_NUMBER, self)
+        self.update_checker.available.connect(self._update_available)
+        self.update_checker.start()
 
     def _configure_refresh(self):
         screen = self.screen() or QApplication.primaryScreen()
@@ -158,6 +165,7 @@ class CursorWaifu(QWidget):
         menu.aboutToHide.connect(lambda: setattr(self, "menu_open", False))
         tray.setContextMenu(menu)
         tray.activated.connect(self._tray_activated)
+        tray.messageClicked.connect(self._open_update)
         tray.show()
         return tray
 
@@ -229,7 +237,28 @@ class CursorWaifu(QWidget):
             menu.addSeparator()
             quit_action = menu.addAction("Zamknij")
             quit_action.triggered.connect(QApplication.quit)
+        menu.addSeparator()
+        menu.addAction("Sprawdź aktualizacje").triggered.connect(self._check_updates)
         return menu
+
+    def _update_available(self, build: int, tag: str, url: str) -> None:
+        self.latest_update_url = url
+        self.tray.showMessage(
+            APP_NAME,
+            f"Wykryto nowszą wersję ({tag}). Kliknij powiadomienie, aby pobrać EXE.",
+            QSystemTrayIcon.Information,
+            10000,
+        )
+
+    def _open_update(self) -> None:
+        if self.latest_update_url:
+            QDesktopServices.openUrl(QUrl(self.latest_update_url))
+        else:
+            self._check_updates()
+
+    def _check_updates(self) -> None:
+        self.tray.showMessage(APP_NAME, "Sprawdzam aktualizacje GitHuba…", QSystemTrayIcon.Information, 3000)
+        self.update_checker.start()
 
     def _tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.DoubleClick:
@@ -578,3 +607,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
