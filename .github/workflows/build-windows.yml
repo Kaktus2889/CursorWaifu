@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - "app.py"
+      - "motion.py"
+      - "test_*.py"
       - "requirements.txt"
       - "assets/**"
       - ".github/workflows/build-windows.yml"
@@ -29,7 +31,12 @@ jobs:
       - name: Zainstaluj zależności
         run: python -m pip install -r requirements.txt
 
-      - name: Zbuduj CursorWaifu.exe
+      - name: Testy ruchu i animacji
+        # Regression tests run before packaging and publishing.
+        # GUI is tested offscreen; desktop interaction still needs a real desktop.
+        run: python -m unittest discover -v
+
+      - name: Pakuj CursorWaifu.exe
         run: >-
           python -m PyInstaller
           --noconfirm
@@ -38,6 +45,7 @@ jobs:
           --windowed
           --name CursorWaifu
           --add-data "assets/waifu_sprites.webp;assets"
+          --add-data "assets/motion_v2.webp;assets"
           app.py
 
       - name: Udostępnij gotowy program

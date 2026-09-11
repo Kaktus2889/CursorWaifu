@@ -11,7 +11,9 @@ Pobierz plik i uruchom — instalowanie Pythona ani rozpakowywanie ZIP-a nie jes
 ## Możliwości
 
 - płynny ruch z przyspieszaniem i hamowaniem,
-- cztery klatki animacji biegu oraz obracanie postaci,
+- osiem nowych klatek biegu z tempem kroków zależnym od prędkości,
+- ruch niezależny od FPS, płynne hamowanie i stabilny dystans od kursora,
+- rozciąganie, taniec, podskoki, machanie i oddychanie; łącznie 28 klatek,
 - animacje bezczynności, mrugania, reakcji i snu,
 - przeciąganie postaci lewym przyciskiem myszy,
 - reakcja na kliknięcie i podwójne kliknięcie,
@@ -40,7 +42,9 @@ dist\CursorWaifu.exe
 ## Sterowanie
 
 - **lewy przycisk i przeciągnięcie** — przenoszenie postaci,
-- **podwójne kliknięcie** — reakcja postaci,
+- **podwójne kliknięcie** — taniec,
+- **puszczenie po przeciągnięciu** — podskok,
+- **prawy przycisk** — taniec, rozciąganie, siadanie, sen i wybudzenie,
 - **prawy przycisk** — ustawienia i zamknięcie programu,
 - **ikona obok zegara** — ponowne pokazanie i zamknięcie aplikacji.
 
