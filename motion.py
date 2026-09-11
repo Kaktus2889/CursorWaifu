@@ -1,6 +1,6 @@
 """Frame-rate independent, acceleration-limited cursor following (pixels/seconds)."""
 from dataclasses import dataclass
-from math import hypot, sqrt
+from math import hypot, sqrt, expm1
 
 
 @dataclass
@@ -37,7 +37,7 @@ class Motion:
             ux, uy = (dx / distance, dy / distance) if distance else (0, 0)
             dvx, dvy = ux * desired - self.vx, uy * desired - self.vy
             change = hypot(dvx, dvy)
-            scale = min(1, accel * h / change) if change else 0
+            scale = min(-expm1(-16*h), accel * h / change) if change else 0
             self.vx += dvx * scale
             self.vy += dvy * scale
             if not self.chasing and hypot(self.vx, self.vy) < 1:

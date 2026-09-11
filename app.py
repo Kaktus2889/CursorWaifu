@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from motion import Motion
 from caret import CaretObserver, to_logical
+from animation import RunCycle, align_run, blend, ease
 
 from PySide6.QtCore import QPoint, QRect, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QCursor, QIcon, QPainter, QPixmap, QTransform, QBitmap, QRegion
@@ -52,7 +53,17 @@ class CursorWaifu(QWidget):
         self.setFixedSize(self.pet_size, self.pet_size)
 
         self.frames = self._load_frames()
+        self.frames[12:20] = align_run(self.frames[12:20])
         self.mirrored = [p.transformed(QTransform().scale(-1, 1)) for p in self.frames]
+        self.run_cycle = RunCycle(self.frames[12:20])
+        self.run_left = RunCycle(self.mirrored[12:20])
+        self.displayed = self.frames[0]
+        self.transition_from = self.displayed
+        self.render_key = ("idle", False)
+        self.transition_elapsed = 1.0
+        self.visual_bob = 0.0
+        self.visual_lean = 0.0
+        self.visual_speed = 0.0
         self.motion = Motion()
         self.last_tick = time.monotonic()
         self.anim_time = 0.0
@@ -89,6 +100,19 @@ class CursorWaifu(QWidget):
         self.timer.setTimerType(Qt.PreciseTimer)
         self.timer.timeout.connect(self._tick)
         self.timer.start(TICK_MS)
+        self._configure_refresh()
+
+    def _configure_refresh(self):
+        screen = self.screen() or QApplication.primaryScreen()
+        # Follow the display up to 144 Hz, with a 60 Hz minimum target.
+        hz = min(144.0, max(60.0, screen.refreshRate()))
+        self.timer.setInterval(max(7, round(1000 / hz)))
+        if self.windowHandle():
+            self.windowHandle().screenChanged.connect(self._screen_changed)
+
+    def _screen_changed(self, screen):
+        hz = min(144.0, max(60.0, screen.refreshRate()))
+        self.timer.setInterval(max(7, round(1000 / hz)))
 
     def _load_frames(self) -> list[QPixmap]:
         # New atlas has explicit row boundaries: never split a body at 1/4 height.
@@ -277,6 +301,41 @@ class CursorWaifu(QWidget):
         else:
             phase = t % 4.3
             self.frame_index = 2 if phase > 4.12 else (0 if phase < 2.1 else 1)
+        self._update_visual(dt)
+
+    def _update_visual(self, dt):
+        running = self.state == "running"
+        flip = ((not self.facing_right and running) or
+                (self.facing_right and self.state == "watch"))
+        if running:
+            target = (self.run_left if flip else self.run_cycle).sample(self.run_phase)
+        else:
+            target = (self.mirrored if flip else self.frames)[self.frame_index]
+            target = target.scaled(270, 270, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        # Transition between states and direction changes; don't restart per run pose.
+        key = (self.state, flip) if running else (self.state, flip, self.frame_index)
+        if key != self.render_key:
+            self.transition_from = self.displayed
+            self.transition_elapsed = 0
+            self.render_key = key
+        self.transition_elapsed += dt
+        duration = 0.10 if running else 0.12
+        self.displayed = blend(self.transition_from, target, min(1, self.transition_elapsed/duration))
+        speed = math.hypot(self.motion.vx, self.motion.vy) if running else 0
+        self.visual_speed = ease(self.visual_speed, speed, dt)
+        lean = max(-5, min(5, self.motion.vx/95)) if running else 0
+        bob = 0.0
+        if self.state in ("idle", "sit", "sleeping", "watch", "drowsy"):
+            bob = math.sin(self.anim_time * 2.2) * 1.1
+        elif running:
+            # Tiny gait-linked suspension rather than uncorrelated per-frame jitter.
+            bob = -abs(math.sin(self.run_phase * math.pi/4)) * min(1.5, self.visual_speed/250)
+        elif self.state == "jump":
+            bob = -abs(math.sin(self.anim_time * math.pi*2)) * self.height()*0.14
+        elif self.state == "sway":
+            lean = math.sin(self.anim_time*3)*3
+        self.visual_lean = ease(self.visual_lean, lean, dt)
+        self.visual_bob = ease(self.visual_bob, bob, dt, 22)
 
     def _tick(self):
         now = time.monotonic()
@@ -316,10 +375,10 @@ class CursorWaifu(QWidget):
         self.float_x, self.float_y = self.motion.x, self.motion.y
         self._apply_float_position()
         distance = math.hypot(self.motion.x - before_x, self.motion.y - before_y)
-        moving = distance > 0.02
+        speed_now = math.hypot(self.motion.vx, self.motion.vy)
+        moving = speed_now > (3 if self.state == "running" else 9)
         if moving:
             if self.state != "running":
-                self.run_phase = 0
                 self.anim_time = 0
             self.state = "running"
             self.last_motion = now
@@ -327,7 +386,7 @@ class CursorWaifu(QWidget):
             if abs(self.motion.vx) > 18:
                 self.facing_right = self.motion.vx > 0
             # Footfall cadence follows distance, not a fixed animation timer.
-            self.run_phase += distance / (self.pet_size * 0.85) * 8
+            self.run_phase = (self.run_phase + distance / (self.pet_size * 1.05) * 8) % 8
         else:
             idle_for = now - self.last_motion
             state = ("watch" if watching else "sleeping" if idle_for > 110 else
@@ -372,26 +431,14 @@ class CursorWaifu(QWidget):
     def paintEvent(self, event) -> None:  # type: ignore[override]
         painter = QPainter(self)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
-        pixmap = self.frames[self.frame_index]
-        if (not self.facing_right and self.state == "running") or (self.facing_right and self.state == "watch"):
-            pixmap = self.mirrored[self.frame_index]
-        # Small breathing/suspension movements are rendered at floating precision.
         from PySide6.QtCore import QRectF
-        t = self.anim_time
-        bob = 0.0
-        lean = 0.0
-        if self.state in ("idle", "sit", "sleeping", "watch", "drowsy"):
-            bob = math.sin(t * (2 if self.state == "sleeping" else 3)) * 1.1
-        elif self.state == "running":
-            lean = max(-4, min(4, self.motion.vx / 110))
-        elif self.state == "jump":
-            bob = -abs(math.sin(t * math.pi * 2)) * self.height() * 0.14
-        elif self.state == "sway":
-            lean = math.sin(t * 3) * 3
-        painter.translate(self.width() / 2, self.height() * 0.94 + bob)
-        painter.rotate(lean)
-        target = QRectF(-self.width() * 0.46, -self.height() * 0.9, self.width() * 0.92, self.height() * 0.9)
-        painter.drawPixmap(target, pixmap, QRectF(pixmap.rect()))
+        # OS windows have integer positions. Paint the fractional remainder inside.
+        fx = self.float_x - self.x()
+        fy = self.float_y - self.y()
+        painter.translate(self.width()/2 + fx, self.height()*0.94 + self.visual_bob + fy)
+        painter.rotate(self.visual_lean)
+        target = QRectF(-self.width()*0.46, -self.height()*0.9, self.width()*0.92, self.height()*0.9)
+        painter.drawPixmap(target, self.displayed, QRectF(self.displayed.rect()))
 
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
         if event.button() == Qt.LeftButton:
