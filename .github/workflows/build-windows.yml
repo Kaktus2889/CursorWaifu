@@ -14,7 +14,7 @@ jobs:
   build:
     runs-on: windows-latest
     permissions:
-      contents: read
+      contents: write
 
     steps:
       - name: Pobierz kod
@@ -46,3 +46,18 @@ jobs:
           name: CursorWaifu-Windows
           path: dist/CursorWaifu.exe
           if-no-files-found: error
+
+      - name: Opublikuj EXE w Releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          RELEASE_NUMBER: ${{ github.run_number }}
+          RELEASE_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          $tag = "windows-$env:RELEASE_NUMBER-$env:RELEASE_ATTEMPT"
+          gh release create $tag "dist/CursorWaifu.exe" --target "$env:RELEASE_COMMIT" --title "CursorWaifu Windows $env:RELEASE_NUMBER" --notes "Przenosna wersja Windows. Pobierz CursorWaifu.exe i uruchom. Python nie jest wymagany." --draft
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release edit $tag --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
