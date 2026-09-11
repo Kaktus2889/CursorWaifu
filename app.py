@@ -71,7 +71,7 @@ class CursorWaifu(QWidget):
         self.timer.start(TICK_MS)
 
     def _load_frames(self) -> list[QPixmap]:
-        sheet_path = resource_path("assets/waifu_sprites.png")
+        sheet_path = resource_path("assets/waifu_sprites.webp")
         sheet = QPixmap(str(sheet_path))
         if sheet.isNull():
             raise FileNotFoundError(f"Nie znaleziono arkusza animacji: {sheet_path}")
