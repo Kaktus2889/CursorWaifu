@@ -51,8 +51,11 @@ class CaretObserver:
                 old_context = self.u.SetThreadDpiAwarenessContext(W.HANDLE(-4))
             info = GUIINFO()
             info.cbSize = C.sizeof(info)
-            foreground = self.u.GetForegroundWindow()
-            if not self.u.GetGUIThreadInfo(0, C.byref(info)) or not info.hwndCaret or info.hwndActive != foreground:
+            # idThread=0 asks Windows for the foreground GUI thread.  Its
+            # hwndActive can be a top-level window while hwndCaret belongs to
+            # a focused child control, so comparing the two handles drops
+            # valid carets in browsers, Discord and editor controls.
+            if not self.u.GetGUIThreadInfo(0, C.byref(info)) or not info.hwndCaret:
                 self.reset()
                 return None
             rect = info.rcCaret
