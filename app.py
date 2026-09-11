@@ -260,8 +260,14 @@ class CursorWaifu(QWidget):
             return
         if now - self.last_caret_poll >= 0.12:
             self.last_caret_poll = now
+            was_detected = self.caret_point is not None
             point = to_logical(self.caret_observer.poll(), QApplication.screens())
             self.caret_point = QPoint(round(point[0]), round(point[1])) if point else None
+            is_detected = self.caret_point is not None
+            if is_detected != was_detected:
+                self.tray.setToolTip(
+                    f"{APP_NAME} — kursor tekstowy: {'wykryty' if is_detected else 'brak (mysz)'}"
+                )
 
     def _watch_destination(self, caret):
         # Sit below and beside the insertion point, leaving the text line clear.
