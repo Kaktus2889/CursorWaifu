@@ -13,7 +13,9 @@ Pobierz plik i uruchom — instalowanie Pythona ani rozpakowywanie ZIP-a nie jes
 - płynny ruch z przyspieszaniem i hamowaniem,
 - osiem nowych klatek biegu z tempem kroków zależnym od prędkości,
 - ruch niezależny od FPS, płynne hamowanie i stabilny dystans od kursora,
-- rozciąganie, taniec, podskoki, machanie i oddychanie; łącznie 28 klatek,
+- nowe pełne pozy stania bez uciętych stóp; bezpieczne marginesy klatek,
+- rozciąganie, taniec, podskoki, machanie, rozglądanie, ziewanie, nieśmiała mina, kołysanie i oddychanie,
+- na Windowsie opcjonalne obserwowanie miejsca pisania (pozycji kursora tekstowego),
 - animacje bezczynności, mrugania, reakcji i snu,
 - przeciąganie postaci lewym przyciskiem myszy,
 - reakcja na kliknięcie i podwójne kliknięcie,
@@ -23,6 +25,22 @@ Pobierz plik i uruchom — instalowanie Pythona ani rozpakowywanie ZIP-a nie jes
 - opcjonalny start razem z Windowsem.
 
 ## Uruchomienie
+
+### Obserwowanie pisania i prywatność
+
+Opcję **Patrz na miejsce pisania (bez odczytu tekstu)** wyłączysz prawym
+przyciskiem myszy. Działa przy włączonym podążaniu. Postać podchodzi obok
+systemowego kursora tekstowego, patrzy w jego stronę i mruga. Po kilku sekundach
+bez zmiany pozycji kursora wraca do myszy. Można ją też ręcznie uśpić.
+
+To obserwowanie geometrii, nie czytanie wiadomości: brak przechwytywania klawiszy,
+odczytu tekstu, schowka, zrzutów ekranu i wysyłania danych. Nie rozumie wpisanej
+treści. Niektóre przeglądarki, edytory i aplikacje rysują własny kursor i nie
+udostępniają go tą metodą; wtedy działa zwykłe podążanie za myszą. Pozycję
+ustala Windows [GetGUIThreadInfo](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getguithreadinfo)
+i [ClientToScreen](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-clienttoscreen).
+
+### Z kodu źródłowego
 
 Wymagany jest Python 3.10 lub nowszy.
 

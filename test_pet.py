@@ -27,15 +27,15 @@ class PetTests(unittest.TestCase):
 
     def test_frames_and_all_clips_render(self):
         p = self.pet
-        self.assertEqual(len(p.frames), 28)
+        self.assertEqual(len(p.frames), 44)
         self.assertTrue(all(not frame.isNull() for frame in p.frames))
         self.assertTrue(p.frames[12].hasAlphaChannel())
         p.show()
-        for state in ("idle", "running", "dance", "stretch", "wave", "sit", "sleeping", "jump", "drag"):
+        for state in ("idle", "running", "dance", "stretch", "wave", "sit", "sleeping", "jump", "drag", "look", "yawn", "shy", "sway", "watch", "drowsy"):
             p._play(state, 2)
             for _ in range(12):
                 p._animate(0.15)
-                self.assertIn(p.frame_index, range(28))
+                self.assertIn(p.frame_index, range(44))
                 self.assertFalse(p.grab().isNull())
 
     def test_wake_cancels_manual_sleep(self):
@@ -62,9 +62,43 @@ class PetTests(unittest.TestCase):
         p.last_motion = time.monotonic() - 30
         p._tick()
         self.assertEqual(p.state, "sit")
-        p.last_motion = time.monotonic() - 60
+        p.last_motion = time.monotonic() - 120
         p._tick()
         self.assertEqual(p.state, "sleeping")
+
+    def test_new_idle_frames_have_safe_transparent_margin(self):
+        from PySide6.QtGui import QBitmap, QRegion
+        for frame in self.pet.frames[28:]:
+            box = QRegion(QBitmap.fromImage(frame.toImage().createAlphaMask())).boundingRect()
+            self.assertGreaterEqual(box.top(), 15)
+            self.assertLess(box.bottom(), frame.height()-9)
+            self.assertGreater(box.left(), 0)
+            self.assertLess(box.right(), frame.width()-1)
+
+    def test_watch_mode_and_disable(self):
+        from PySide6.QtCore import QPoint
+        p = self.pet
+        p.caret_point = QPoint(300, 200)
+        p._poll_caret = lambda now: None
+        p.following = True
+        target = p._watch_destination(p.caret_point)
+        p.motion.x, p.motion.y = target.x(), target.y()
+        p.float_x, p.float_y = p.motion.x, p.motion.y
+        p._tick()
+        self.assertEqual(p.state, "watch")
+        self.assertIn(p.frame_index, [32, 33])
+        p._toggle_typing(False)
+        self.assertIsNone(p.caret_point)
+
+    def test_idle_action_keeps_inactivity_clock(self):
+        p = self.pet
+        p.following = False
+        before = time.monotonic() - 35
+        p.last_motion = before
+        p.next_idle_action = 0
+        p._tick()
+        self.assertEqual(p.last_motion, before)
+        self.assertTrue(p.auto_reaction)
 
     def test_resize_and_menu_refresh(self):
         p = self.pet

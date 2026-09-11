@@ -15,7 +15,7 @@ class Motion:
         self.vx = self.vy = 0.0
         self.chasing = False
 
-    def step(self, tx, ty, dt, size=190, speed=1.0, enabled=True):
+    def step(self, tx, ty, dt, size=190, speed=1.0, enabled=True, stop_radius=None):
         # Substeps keep acceleration/braking consistent even on busy desktops.
         remaining = max(0.0, min(dt, 0.1))
         travelled = 0.0
@@ -24,7 +24,7 @@ class Motion:
             remaining -= h
             dx, dy = tx - self.x, ty - self.y
             distance = hypot(dx, dy)
-            radius = size * 0.56
+            radius = size * 0.56 if stop_radius is None else max(0, stop_radius)
             if not enabled:
                 self.chasing = False
             elif distance > radius + 18:

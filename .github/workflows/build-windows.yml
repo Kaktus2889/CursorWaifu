@@ -7,6 +7,7 @@ on:
     paths:
       - "app.py"
       - "motion.py"
+      - "caret.py"
       - "test_*.py"
       - "requirements.txt"
       - "assets/**"
@@ -44,7 +45,7 @@ jobs:
           --onefile
           --windowed
           --name CursorWaifu
-          --add-data "assets/waifu_sprites.webp;assets"
+          --add-data "assets/idle_v3.webp;assets"
           --add-data "assets/motion_v2.webp;assets"
           app.py
 

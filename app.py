@@ -7,9 +7,10 @@ import sys
 import time
 from pathlib import Path
 from motion import Motion
+from caret import CaretObserver, to_logical
 
 from PySide6.QtCore import QPoint, QRect, QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QCursor, QIcon, QPainter, QPixmap, QTransform
+from PySide6.QtGui import QAction, QCursor, QIcon, QPainter, QPixmap, QTransform, QBitmap, QRegion
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon, QWidget
 
 
@@ -32,6 +33,11 @@ class CursorWaifu(QWidget):
         self.pet_size = int(self.settings.value("size", 190))
         self.speed = float(self.settings.value("speed", 1.0))
         self.following = self.settings.value("following", True, type=bool)
+        self.watch_typing = self.settings.value("watch_typing", True, type=bool)
+        self.caret_observer = CaretObserver()
+        self.caret_point = None
+        self.last_caret_poll = 0.0
+        self.auto_reaction = False
 
         self.setWindowTitle(APP_NAME)
         self.setWindowFlags(
@@ -41,6 +47,8 @@ class CursorWaifu(QWidget):
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_NoSystemBackground)
+        self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setWindowFlag(Qt.WindowDoesNotAcceptFocus, True)
         self.setFixedSize(self.pet_size, self.pet_size)
 
         self.frames = self._load_frames()
@@ -83,26 +91,39 @@ class CursorWaifu(QWidget):
         self.timer.start(TICK_MS)
 
     def _load_frames(self) -> list[QPixmap]:
-        sheet_path = resource_path("assets/waifu_sprites.webp")
-        sheet = QPixmap(str(sheet_path))
-        if sheet.isNull():
-            raise FileNotFoundError(f"Nie znaleziono arkusza animacji: {sheet_path}")
-
-        cell_w = sheet.width() // SPRITE_COLUMNS
-        cell_h = sheet.height() // SPRITE_ROWS
-        frames = [
-            sheet.copy(col * cell_w, row * cell_h, cell_w, cell_h)
-            for row in range(SPRITE_ROWS)
-            for col in range(SPRITE_COLUMNS)
-        ]
+        # New atlas has explicit row boundaries: never split a body at 1/4 height.
+        idle = QPixmap(str(resource_path("assets/idle_v3.webp")))
         extra = QPixmap(str(resource_path("assets/motion_v2.webp")))
-        if extra.isNull():
-            raise FileNotFoundError("Brak assets/motion_v2.webp")
+        if idle.isNull() or extra.isNull():
+            raise FileNotFoundError("Brak arkusza idle_v3.webp lub motion_v2.webp")
+        rows = [0, 355, 675, 955, 1254]
+        idle_raw = []
+        for row in range(4):
+            y0, y1 = [round(y * idle.height() / 1254) for y in rows[row:row+2]]
+            for col in range(4):
+                x0, x1 = round(col * idle.width()/4), round((col+1)*idle.width()/4)
+                idle_raw.append(idle.copy(x0, y0, x1-x0, y1-y0))
+        # Alpha bounding boxes plus a common scale preserve full feet and head size.
+        boxes = [QRegion(QBitmap.fromImage(p.toImage().createAlphaMask())).boundingRect() for p in idle_raw]
+        factor = 238 / max(b.height() for b in boxes)
+        idle_frames = []
+        for source, box in zip(idle_raw, boxes):
+            canvas = QPixmap(270, 270)
+            canvas.fill(Qt.transparent)
+            p = source.copy(box).scaled(round(box.width()*factor), round(box.height()*factor),
+                                         Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            painter = QPainter(canvas)
+            painter.drawPixmap((270-p.width())//2, 258-p.height(), p)
+            painter.end()
+            idle_frames.append(canvas)
+        # Preserve public frame indices, but replace every damaged legacy idle.
+        frames = [idle_frames[i] for i in [0, 1, 2, 15, 0, 0, 0, 0, 8, 13, 4, 15]]
         for row in range(4):
             for col in range(4):
-                x0, x1 = round(col * extra.width() / 4), round((col + 1) * extra.width() / 4)
-                y0, y1 = round(row * extra.height() / 4), round((row + 1) * extra.height() / 4)
-                frames.append(extra.copy(x0, y0, x1 - x0, y1 - y0))
+                x0, x1 = round(col*extra.width()/4), round((col+1)*extra.width()/4)
+                y0, y1 = round(row*extra.height()/4), round((row+1)*extra.height()/4)
+                frames.append(extra.copy(x0, y0, x1-x0, y1-y0))
+        frames.extend(idle_frames)
         return frames
 
     def _create_tray(self) -> QSystemTrayIcon:
@@ -141,6 +162,10 @@ class CursorWaifu(QWidget):
         follow_action.setChecked(self.following)
         follow_action.triggered.connect(self._toggle_following)
         menu.addAction(follow_action)
+        typing = menu.addAction("Patrz na miejsce pisania (bez odczytu tekstu)")
+        typing.setCheckable(True)
+        typing.setChecked(self.watch_typing)
+        typing.triggered.connect(self._toggle_typing)
 
         size_menu = menu.addMenu("Rozmiar")
         for label, value in (("Mała", 140), ("Normalna", 190), ("Duża", 250)):
@@ -159,6 +184,8 @@ class CursorWaifu(QWidget):
             speed_menu.addAction(action)
 
         menu.addSeparator()
+        for label, state in (("Rozejrzyj się", "look"), ("Ziewnij", "yawn"), ("Pobujaj się", "sway"), ("Nieśmiała mina", "shy")):
+            menu.addAction(label).triggered.connect(lambda checked=False, s=state: self._play(s, 3.5))
         wave = menu.addAction("Pomachaj 👋")
         wave.triggered.connect(lambda: self._play("wave", 2))
         for label, state in (("Zatańcz", "dance"), ("Przeciągnij się", "stretch"), ("Podskocz", "jump"), ("Usiądź", "sit")):
@@ -186,7 +213,8 @@ class CursorWaifu(QWidget):
             self.raise_()
             self._toggle_following(True)
 
-    def _play(self, state, duration):
+    def _play(self, state, duration, automatic=False):
+        self.auto_reaction = automatic
         self.manual_sleep = False
         self.motion.stop()
         self.state = state
@@ -195,6 +223,33 @@ class CursorWaifu(QWidget):
         self.last_motion = time.monotonic()
         self._animate(0)
         self.update()
+
+    def _toggle_typing(self, enabled):
+        self.watch_typing = enabled
+        self.caret_point = None
+        self.caret_observer.reset()
+        self.settings.setValue("watch_typing", enabled)
+
+    def _poll_caret(self, now):
+        if not self.watch_typing:
+            self.caret_point = None
+            return
+        if now - self.last_caret_poll >= 0.12:
+            self.last_caret_poll = now
+            point = to_logical(self.caret_observer.poll(), QApplication.screens())
+            self.caret_point = QPoint(round(point[0]), round(point[1])) if point else None
+
+    def _watch_destination(self, caret):
+        # Sit below and beside the insertion point, leaving the text line clear.
+        screen = QApplication.screenAt(caret) or QApplication.primaryScreen()
+        area = screen.availableGeometry()
+        x = caret.x() + 24
+        y = caret.y() + 30
+        if x + self.width() > area.right():
+            x = caret.x() - self.width() - 24
+        if y + self.height() > area.bottom():
+            y = caret.y() - self.height() - 30
+        return self._clamped_position(QPoint(x, y))
 
     def _animate(self, dt):
         self.anim_time += dt
@@ -207,6 +262,12 @@ class CursorWaifu(QWidget):
             "sleeping": ([9], 1),
             "jump": ([11], 1),
             "drag": ([10], 1),
+            "look": ([28, 32, 33, 32, 28, 31], 0.6),
+            "yawn": ([29, 34, 34, 35, 28], 0.65),
+            "shy": ([28, 31, 31, 30, 28], 0.55),
+            "sway": ([36, 38, 37, 39], 0.55),
+            "watch": ([32, 32, 32, 33], 0.8),
+            "drowsy": ([36, 40, 37, 40], 0.9),
         }
         if self.state in clips:
             frames, interval = clips[self.state]
@@ -234,16 +295,24 @@ class CursorWaifu(QWidget):
             self._animate(dt)
             self.update()
             return
+        self._poll_caret(now)
+        cursor = QCursor.pos()
+        watching = self.following and self.caret_point is not None
+        mouse_far = math.hypot(cursor.x() - self.x() - self.width()/2,
+                               cursor.y() - self.y() - self.height()/2) > self.pet_size * 0.85
+        if self.auto_reaction and (watching or (self.following and mouse_far)):
+            self.reaction_until = 0
         if self.reaction_until > now:
             self._animate(dt)
             self.update()
             return
 
-        cursor = QCursor.pos()
         # Follow a reachable point; at screen edges do not run against a wall.
-        desired = self._clamped_position(cursor - QPoint(self.width() // 2, self.height() // 2))
+        desired = (self._watch_destination(self.caret_point) if watching else
+                   self._clamped_position(cursor - QPoint(self.width() // 2, self.height() // 2)))
         before_x, before_y = self.motion.x, self.motion.y
-        self.motion.step(desired.x(), desired.y(), dt, self.pet_size, self.speed, self.following)
+        self.motion.step(desired.x(), desired.y(), dt, self.pet_size, self.speed, self.following,
+                         stop_radius=4 if watching else None)
         self.float_x, self.float_y = self.motion.x, self.motion.y
         self._apply_float_position()
         distance = math.hypot(self.motion.x - before_x, self.motion.y - before_y)
@@ -261,15 +330,21 @@ class CursorWaifu(QWidget):
             self.run_phase += distance / (self.pet_size * 0.85) * 8
         else:
             idle_for = now - self.last_motion
-            state = "sleeping" if idle_for > 55 else ("sit" if idle_for > 25 else "idle")
+            state = ("watch" if watching else "sleeping" if idle_for > 110 else
+                     "drowsy" if idle_for > 80 else "sit" if idle_for > 25 else "idle")
             if self.state != state:
                 self.anim_time = 0
             self.state = state
-            if idle_for < 25 and now >= self.next_idle_action:
+            if watching:
+                self.facing_right = self.caret_point.x() >= self.x() + self.width()/2
+                self.last_motion = now
+                self.next_idle_action = now + 8
+            if not watching and idle_for < 80 and now >= self.next_idle_action:
                 last_motion = self.last_motion
-                self._play(random.choice(["stretch", "wave", "dance"]), 2.6)
+                options = ["stretch", "look", "yawn", "shy", "wave"] if idle_for < 25 else ["sway", "yawn", "look"]
+                self._play(random.choice(options), random.uniform(3, 4.2), automatic=True)
                 self.last_motion = last_motion
-                self.next_idle_action = now + random.uniform(15, 22)
+                self.next_idle_action = now + random.uniform(7, 12)
         self._animate(dt)
         self.update()
 
@@ -298,19 +373,21 @@ class CursorWaifu(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
         pixmap = self.frames[self.frame_index]
-        if not self.facing_right and self.state == "running":
+        if (not self.facing_right and self.state == "running") or (self.facing_right and self.state == "watch"):
             pixmap = self.mirrored[self.frame_index]
         # Small breathing/suspension movements are rendered at floating precision.
         from PySide6.QtCore import QRectF
         t = self.anim_time
         bob = 0.0
         lean = 0.0
-        if self.state in ("idle", "sit", "sleeping"):
+        if self.state in ("idle", "sit", "sleeping", "watch", "drowsy"):
             bob = math.sin(t * (2 if self.state == "sleeping" else 3)) * 1.1
         elif self.state == "running":
             lean = max(-4, min(4, self.motion.vx / 110))
         elif self.state == "jump":
             bob = -abs(math.sin(t * math.pi * 2)) * self.height() * 0.14
+        elif self.state == "sway":
+            lean = math.sin(t * 3) * 3
         painter.translate(self.width() / 2, self.height() * 0.94 + bob)
         painter.rotate(lean)
         target = QRectF(-self.width() * 0.46, -self.height() * 0.9, self.width() * 0.92, self.height() * 0.9)
