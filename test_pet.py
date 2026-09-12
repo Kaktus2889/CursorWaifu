@@ -3,6 +3,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 from app import CursorWaifu
@@ -17,8 +18,39 @@ class PetTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
+        checker = patch("app.UpdateChecker.start")
+        checker.start()
+        self.addCleanup(checker.stop)
         self.pet = CursorWaifu()
+        self.pet._toggle_following(True)
         self.pet.timer.stop()
+
+    def test_taskbar_switch_and_turnaround(self):
+        p = self.pet
+        p._toggle_taskbar(True)
+        self.assertTrue(p.taskbar_walk)
+        self.assertFalse(p.following)
+        now = time.monotonic()
+        target = p._patrol_destination(now)
+        area = p.screen().availableGeometry()
+        self.assertEqual(target.y(), area.bottom() + 1 - p.height())
+        direction = p.patrol_right
+        p.motion.x, p.motion.y = target.x(), target.y()
+        next_target = p._patrol_destination(now)
+        self.assertNotEqual(p.patrol_right, direction)
+        self.assertGreater(p.patrol_pause_until, now)
+        self.assertEqual(next_target.y(), target.y())
+        self.assertNotEqual(next_target.x(), target.x())
+        p._toggle_following(True)
+        self.assertFalse(p.taskbar_walk)
+        self.assertTrue(p.following)
+
+    def test_taskbar_resize_recalculates_floor(self):
+        p = self.pet
+        p._toggle_taskbar(True)
+        p._set_size(250)
+        target = p._patrol_destination(time.monotonic())
+        self.assertEqual(target.y(), p.screen().availableGeometry().bottom() + 1 - 250)
 
     def tearDown(self):
         self.pet.close()

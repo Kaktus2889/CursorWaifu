@@ -37,6 +37,11 @@ class CursorWaifu(QWidget):
         self.pet_size = int(self.settings.value("size", 190))
         self.speed = float(self.settings.value("speed", 1.0))
         self.following = self.settings.value("following", True, type=bool)
+        self.taskbar_walk = self.settings.value("taskbar_walk", False, type=bool)
+        if self.taskbar_walk:
+            self.following = False
+        self.patrol_right = True
+        self.patrol_pause_until = 0.0
         self.watch_typing = self.settings.value("watch_typing", True, type=bool)
         self.caret_observer = CaretObserver()
         self.caret_point = None
@@ -194,6 +199,10 @@ class CursorWaifu(QWidget):
         follow_action.setChecked(self.following)
         follow_action.triggered.connect(self._toggle_following)
         menu.addAction(follow_action)
+        patrol = menu.addAction("Spaceruj po pasku zadań")
+        patrol.setCheckable(True)
+        patrol.setChecked(self.taskbar_walk)
+        patrol.triggered.connect(self._toggle_taskbar)
         typing = menu.addAction("Patrz na miejsce pisania (bez odczytu tekstu)")
         typing.setCheckable(True)
         typing.setChecked(self.watch_typing)
@@ -404,9 +413,13 @@ class CursorWaifu(QWidget):
         # Follow a reachable point; at screen edges do not run against a wall.
         desired = (self._watch_destination(self.caret_point) if watching else
                    self._clamped_position(cursor - QPoint(self.width() // 2, self.height() // 2)))
+        if self.taskbar_walk:
+            desired = self._patrol_destination(now)
         before_x, before_y = self.motion.x, self.motion.y
-        self.motion.step(desired.x(), desired.y(), dt, self.pet_size, self.speed, self.following,
-                         stop_radius=4 if watching else None)
+        enabled = self.following or (self.taskbar_walk and now >= self.patrol_pause_until)
+        self.motion.step(desired.x(), desired.y(), dt, self.pet_size,
+                         self.speed * (0.55 if self.taskbar_walk else 1), enabled,
+                         stop_radius=0 if self.taskbar_walk else 4 if watching else None)
         self.float_x, self.float_y = self.motion.x, self.motion.y
         self._apply_float_position()
         distance = math.hypot(self.motion.x - before_x, self.motion.y - before_y)
@@ -454,6 +467,30 @@ class CursorWaifu(QWidget):
             self.motion.vy = 0
         self.move(target)
 
+    def _patrol_destination(self, now):
+        # Qt work areas use logical pixels, including scaled/negative monitors.
+        screen = self.screen() or QApplication.primaryScreen()
+        area = screen.availableGeometry()
+        left = area.left()
+        right = max(left, area.right() + 1 - self.width())
+        floor = max(area.top(), area.bottom() + 1 - self.height())
+        x = right if self.patrol_right else left
+        if (now >= self.patrol_pause_until and
+                math.hypot(self.motion.x - x, self.motion.y - floor) < 3):
+            self.motion.stop()
+            self.patrol_right = not self.patrol_right
+            self.patrol_pause_until = now + random.uniform(4, 9)
+            self._play(random.choice(["look", "wave", "stretch"]), 3, automatic=True)
+            x = right if self.patrol_right else left
+        return QPoint(x, floor)
+
+    def _toggle_taskbar(self, enabled):
+        self._toggle_following(False)
+        self.taskbar_walk = enabled
+        self.settings.setValue("taskbar_walk", enabled)
+        self.patrol_pause_until = 0.0
+        self.patrol_right = self.facing_right
+
     def _clamped_position(self, point: QPoint) -> QPoint:
         center = point + QPoint(self.width() // 2, self.height() // 2)
         screen = QApplication.screenAt(center) or QApplication.primaryScreen()
@@ -470,7 +507,9 @@ class CursorWaifu(QWidget):
         # OS windows have integer positions. Paint the fractional remainder inside.
         fx = self.float_x - self.x()
         fy = self.float_y - self.y()
-        painter.translate(self.width()/2 + fx, self.height()*0.94 + self.visual_bob + fy)
+        # Move the transparent sprite padding toward the floor in patrol mode.
+        baseline = 1.02 if self.taskbar_walk else 0.94
+        painter.translate(self.width()/2 + fx, self.height()*baseline + self.visual_bob + fy)
         painter.rotate(self.visual_lean)
         target = QRectF(-self.width()*0.46, -self.height()*0.9, self.width()*0.92, self.height()*0.9)
         painter.drawPixmap(target, self.displayed, QRectF(self.displayed.rect()))
@@ -525,6 +564,8 @@ class CursorWaifu(QWidget):
         self.update()
 
     def _toggle_following(self, enabled: bool) -> None:
+        self.taskbar_walk = False
+        self.settings.setValue("taskbar_walk", False)
         self.following = enabled
         self.manual_sleep = False
         self.motion.stop()
@@ -607,4 +648,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
